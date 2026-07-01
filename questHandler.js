@@ -1,15 +1,24 @@
 const WebSocket = require('ws');
 
-const API_BASE = 'https://discord.com/api/v9';
+const API_BASE = 'https://discord.com/api/v10';
 const GATEWAY_URL = 'wss://gateway.discord.gg/?v=9&encoding=json';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ─── REST API ───────────────────────────────────────────────
 
+function getHeaders(token) {
+  return {
+    Authorization: token,
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+    'X-Discord-Client-Build': '235735', // Required for quests API
+    'X-Discord-Locale': 'en-US',
+  };
+}
+
 async function fetchQuests(token) {
   const res = await fetch(`${API_BASE}/users/@me/quests`, {
-    headers: { Authorization: token },
+    headers: getHeaders(token),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -21,7 +30,7 @@ async function fetchQuests(token) {
 
 async function fetchQuest(token, questId) {
   const res = await fetch(`${API_BASE}/users/@me/quests/${questId}`, {
-    headers: { Authorization: token },
+    headers: getHeaders(token),
   });
   if (!res.ok) throw new Error(`Fetch quest failed: ${res.status}`);
   return res.json();
@@ -31,7 +40,7 @@ async function ackQuest(token, questId) {
   try {
     await fetch(`${API_BASE}/users/@me/quests/${questId}/ack`, {
       method: 'POST',
-      headers: { Authorization: token },
+      headers: getHeaders(token),
     });
   } catch {
     /* ignore ack errors */
@@ -41,7 +50,7 @@ async function ackQuest(token, questId) {
 async function validateToken(token) {
   try {
     const res = await fetch(`${API_BASE}/users/@me`, {
-      headers: { Authorization: token },
+      headers: getHeaders(token),
     });
     if (!res.ok) return null;
     return await res.json();
