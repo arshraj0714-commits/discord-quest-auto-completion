@@ -1,0 +1,17 @@
+{
+  "name": "discord-quest-auto-completion",
+  "version": "1.0.0",
+  "description": "A Discord bot that automatically completes Discord quests for linked accounts",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "register": "node register.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "ws": "^8.16.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
