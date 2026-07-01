@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Token storage (NEVER commit this)
+tokens.json
+
+# Environment
+.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
