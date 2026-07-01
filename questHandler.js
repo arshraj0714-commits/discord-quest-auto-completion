@@ -1,6 +1,6 @@
 const WebSocket = require('ws');
 
-const API_BASE = 'https://discord.com/api/v10';
+const API_BASE = 'https://discord.com/api/v9';
 const GATEWAY_URL = 'wss://gateway.discord.gg/?v=9&encoding=json';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -10,8 +10,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function getHeaders(token) {
   return {
     Authorization: token,
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
-    'X-Discord-Client-Build': '235735', // Required for quests API
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'X-Discord-Client-Build': '282549', // Latest client build required for quests
     'X-Discord-Locale': 'en-US',
   };
 }
@@ -53,7 +53,14 @@ async function validateToken(token) {
       headers: getHeaders(token),
     });
     if (!res.ok) return null;
-    return await res.json();
+    const data = await res.json();
+    
+    // REJECT BOT TOKENS - Bots cannot have quests
+    if (data.bot) {
+      return { bot: true };
+    }
+    
+    return data;
   } catch {
     return null;
   }
