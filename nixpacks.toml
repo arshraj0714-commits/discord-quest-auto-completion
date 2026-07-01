@@ -1,0 +1,11 @@
+# Nixpacks config for Railway
+# https://docs.railway.app/deploy/buildpacks
+
+[phases.setup]
+nixPkgs = ['nodejs_20']
+
+[phases.install]
+cmds = ['npm install']
+
+[start]
+cmd = 'node index.js'
