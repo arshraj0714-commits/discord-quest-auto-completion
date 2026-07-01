@@ -245,7 +245,7 @@ async function handleQuest(interaction) {
         name: `${status} ${i + 1}. ${quest.name || 'Unnamed Quest'}`,
         value:
           (quest.description || 'No description available.') +
-          (completed ? '\n`Status: Completed`' : `\n`Progress: ${progress || 0}%`),
+          (completed ? '\n`Status: Completed`' : `\nProgress: ${progress || 0}%`),
         inline: false,
       });
 
