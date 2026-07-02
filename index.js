@@ -22,70 +22,43 @@ const {
   getQuestProgress,
 } = require('./questHandler');
 
-// ─── Config ─────────────────────────────────────────────────
-
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_ID = process.env.GUILD_ID; // optional — for instant guild command registration
+const GUILD_ID = process.env.GUILD_ID;
 
 if (!BOT_TOKEN || !CLIENT_ID) {
   console.error('❌ Missing BOT_TOKEN or CLIENT_ID environment variables!');
   process.exit(1);
 }
 
-// ─── State ──────────────────────────────────────────────────
-
-// Tracks users who are in the middle of linking their token
-const pendingLinks = new Map(); // userId -> { step, timestamp }
-
-// ─── Client ─────────────────────────────────────────────────
+const pendingLinks = new Map();
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.DirectMessages,
-  ],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages],
   partials: [Partials.Channel, Partials.Message],
 });
 
-// ─── Slash Commands ─────────────────────────────────────────
-
 const commands = [
-  new SlashCommandBuilder()
-    .setName('link')
-    .setDescription('Link your Discord account token to complete quests'),
-  new SlashCommandBuilder()
-    .setName('quest')
-    .setDescription('View and complete your available Discord quests'),
-  new SlashCommandBuilder()
-    .setName('quest-all')
-    .setDescription('Automatically complete all available quests'),
-  new SlashCommandBuilder()
-    .setName('unlink')
-    .setDescription('Remove your linked Discord token'),
+  new SlashCommandBuilder().setName('link').setDescription('Link your Discord account token'),
+  new SlashCommandBuilder().setName('quest').setDescription('View and complete your available Discord quests'),
+  new SlashCommandBuilder().setName('quest-all').setDescription('Automatically complete all available quests'),
+  new SlashCommandBuilder().setName('unlink').setDescription('Remove your linked Discord token'),
 ].map((cmd) => cmd.toJSON());
-
-// ─── Register Commands ──────────────────────────────────────
 
 async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
   try {
-    console.log('📝 Registering slash commands…');
     if (GUILD_ID) {
-      await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
-        body: commands,
-      });
+      await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
       console.log('✅ Guild commands registered.');
     } else {
       await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-      console.log('✅ Global commands registered (may take up to 1h to appear).');
+      console.log('✅ Global commands registered.');
     }
   } catch (error) {
     console.error('❌ Command registration error:', error);
   }
 }
-
-// ─── Events ─────────────────────────────────────────────────
 
 client.once(Events.ClientReady, async (c) => {
   console.log(`🤖 Bot online: ${c.user.tag}`);
@@ -95,25 +68,17 @@ client.once(Events.ClientReady, async (c) => {
 client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isChatInputCommand()) {
     switch (interaction.commandName) {
-      case 'link':
-        return handleLink(interaction);
-      case 'quest':
-        return handleQuest(interaction);
-      case 'quest-all':
-        return handleQuestAll(interaction);
-      case 'unlink':
-        return handleUnlink(interaction);
+      case 'link': return handleLink(interaction);
+      case 'quest': return handleQuest(interaction);
+      case 'quest-all': return handleQuestAll(interaction);
+      case 'unlink': return handleUnlink(interaction);
     }
   }
-  if (interaction.isButton()) {
-    return handleQuestButton(interaction);
-  }
+  if (interaction.isButton()) return handleQuestButton(interaction);
 });
 
-// DM message handler — for receiving the token
 client.on(Events.MessageCreate, async (message) => {
-  if (message.guild) return; // DMs only
-  if (message.author.bot) return;
+  if (message.guild || message.author.bot) return;
 
   const pending = pendingLinks.get(message.author.id);
   if (!pending || pending.step !== 'waiting_token') return;
@@ -122,9 +87,14 @@ client.on(Events.MessageCreate, async (message) => {
   const user = await validateToken(token);
 
   if (!user) {
-    await message.reply(
-      '❌ Invalid token. Please double-check you copied the **Authorization** header value correctly and try again.'
-    );
+    await message.reply('❌ Invalid token. Please copy the **Authorization** header value from your browser Network tab.');
+    return;
+  }
+  
+  // STRICT BOT TOKEN CHECK
+  if (user.bot) {
+    await message.reply('❌ **BOT TOKEN DETECTED!** Bots do not have quests. You must use your **Discord User Token**. Use `/link` to try again.');
+    try { await message.delete(); } catch {}
     return;
   }
 
@@ -132,33 +102,19 @@ client.on(Events.MessageCreate, async (message) => {
   pendingLinks.delete(message.author.id);
 
   await message.reply(
-    `✅ **Token linked successfully!**\n` +
-      `Account: **${user.username}** (${user.id})\n\n` +
-      `You can now use \`/quest\` and \`/quest-all\` to complete your Discord quests.`
+    `✅ **Token linked successfully!**\nAccount: **${user.username}** (${user.id})\nUse \`/quest\` to start completing quests.`
   );
 
-  // Delete the original token message for security
-  try {
-    await message.delete();
-  } catch {
-    /* ignore */
-  }
+  try { await message.delete(); } catch {}
 });
-
-// ─── Command Handlers ───────────────────────────────────────
 
 async function handleLink(interaction) {
   const userId = interaction.user.id;
-
-  // Check if already linked
   const existing = getToken(userId);
   if (existing) {
     const user = await validateToken(existing);
-    if (user) {
-      return interaction.reply({
-        content: `✅ You are already linked as **${user.username}**.\nUse \`/unlink\` first if you want to link a different account.`,
-        ephemeral: true,
-      });
+    if (user && !user.bot) {
+      return interaction.reply({ content: `✅ Already linked as **${user.username}**. Use \`/unlink\` to change.`, ephemeral: true });
     }
   }
 
@@ -166,96 +122,49 @@ async function handleLink(interaction) {
 
   try {
     await interaction.user.send(
-      `🔐 **Token Linking**\n\n` +
-        `Please send your Discord **user token** in this DM.\n\n` +
-        `**How to get your token:**\n` +
-        `1. Open Discord in your **browser** (Chrome / Firefox / Edge)\n` +
-        `2. Press **F12** to open Developer Tools\n` +
-        `3. Go to the **Network** tab\n` +
-        `4. Refresh the page or click any channel\n` +
-        `5. Click any request to \`discord.com\`\n` +
-        `6. In **Headers**, find \`Authorization\`\n` +
-        `7. Copy the value — that's your token\n\n` +
-        `⚠️ **WARNING:** Using a user token is against Discord's Terms of Service ` +
-        `and may result in account termination. **Use at your own risk!**\n\n` +
-        `Send your token now 👇`
+      `🔐 **Token Linking**\nPlease send your **Discord USER Token** here.\n\n` +
+      `**How to get it:**\n1. Open Discord in your browser\n2. Press **F12** (Dev Tools)\n3. Go to **Network** tab\n4. Click any channel\n5. Click a request to \`discord.com\`\n6. Find \`Authorization\` in Headers\n7. Copy the value\n\n` +
+      `⚠️ **WARNING:** Do NOT paste a Bot Token. Bot tokens will be rejected.`
     );
-
-    await interaction.reply({
-      content: '📬 Check your DMs! I\'ve sent you instructions on how to link your token.',
-      ephemeral: true,
-    });
+    await interaction.reply({ content: '📬 Check your DMs for instructions.', ephemeral: true });
   } catch {
     pendingLinks.delete(userId);
-    await interaction.reply({
-      content:
-        '❌ I couldn\'t send you a DM. Please enable DMs from server members and try again.',
-      ephemeral: true,
-    });
+    await interaction.reply({ content: '❌ I couldn\'t DM you. Enable DMs and try again.', ephemeral: true });
   }
 }
 
 async function handleQuest(interaction) {
   const token = getToken(interaction.user.id);
-  if (!token) {
-    return interaction.reply({
-      content: '❌ You haven\'t linked your token yet. Use `/link` to get started.',
-      ephemeral: true,
-    });
-  }
+  if (!token) return interaction.reply({ content: '❌ Use `/link` first.', ephemeral: true });
 
   await interaction.deferReply({ ephemeral: true });
-
-  // Validate token
   const user = await validateToken(token);
-  if (!user) {
+  
+  if (!user || user.bot) {
     deleteToken(interaction.user.id);
-    return interaction.editReply(
-      '❌ Your token is invalid or expired. Please use `/link` to re-link your account.'
-    );
+    return interaction.editReply('❌ Token invalid or is a Bot Token. Use `/link` to link your USER token.');
   }
 
   try {
     const quests = await fetchQuests(token);
-
-    if (quests.length === 0) {
-      return interaction.editReply('📭 You have no available quests right now. Check back later!');
-    }
+    if (quests.length === 0) return interaction.editReply('📭 No available quests right now.');
 
     const embed = new EmbedBuilder()
       .setTitle('🎮 Your Discord Quests')
-      .setDescription(
-        `Found **${quests.length}** quest(s). Click a button below to auto-complete a quest.\n\n` +
-          `✅ = Completed  |  ⬜ = Incomplete`
-      )
+      .setDescription(`Found **${quests.length}** quest(s). Click a button to complete.`)
       .setColor(0x5865f2)
-      .setTimestamp()
       .setFooter({ text: `Account: ${user.username}` });
 
     const buttons = [];
-    const MAX_BUTTONS = 25; // Discord limit (5 rows × 5 buttons)
-
-    for (let i = 0; i < Math.min(quests.length, MAX_BUTTONS); i++) {
+    for (let i = 0; i < Math.min(quests.length, 25); i++) {
       const quest = quests[i];
       const completed = isQuestCompleted(quest);
-      const progress = getQuestProgress(quest);
-      const status = completed ? '✅' : '⬜';
-
       embed.addFields({
-        name: `${status} ${i + 1}. ${quest.name || 'Unnamed Quest'}`,
-        value:
-          (quest.description || 'No description available.') +
-          (completed ? '\n`Status: Completed`' : `\nProgress: ${progress || 0}%`),
-        inline: false,
+        name: `${completed ? '✅' : '⬜'} ${i + 1}. ${quest.name || 'Quest'}`,
+        value: quest.description || 'No description',
       });
-
       if (!completed) {
-        buttons.push(
-          new ButtonBuilder()
-            .setCustomId(`qc_${i}`)
-            .setLabel(`Quest ${i + 1}`)
-            .setStyle(ButtonStyle.Primary)
-        );
+        buttons.push(new ButtonBuilder().setCustomId(`qc_${i}`).setLabel(`Quest ${i + 1}`).setStyle(ButtonStyle.Primary));
       }
     }
 
@@ -264,13 +173,9 @@ async function handleQuest(interaction) {
       rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
     }
 
-    await interaction.editReply({
-      embeds: [embed],
-      components: rows.length > 0 ? rows : [],
-    });
+    await interaction.editReply({ embeds: [embed], components: rows });
   } catch (error) {
-    console.error('Quest fetch error:', error);
-    await interaction.editReply(`❌ Failed to fetch quests: \`${error.message}\``);
+    await interaction.editReply(`❌ Fetch failed: \`${error.message}\``);
   }
 }
 
@@ -280,121 +185,58 @@ async function handleQuestButton(interaction) {
   const questIndex = parseInt(match[1]);
 
   const token = getToken(interaction.user.id);
-  if (!token) {
-    return interaction.reply({
-      content: '❌ Token not found. Use `/link` to link your token.',
-      ephemeral: true,
-    });
-  }
+  if (!token) return interaction.reply({ content: '❌ Use `/link` first.', ephemeral: true });
 
-  await interaction.reply({
-    content: '⏳ Starting quest completion… This may take up to **17 minutes**. I\'ll update you here.',
-    ephemeral: true,
-  });
+  await interaction.reply({ content: '⏳ Starting quest...', ephemeral: true });
 
   try {
     const quests = await fetchQuests(token);
     const quest = quests[questIndex];
-
-    if (!quest) {
-      return interaction.editReply('❌ Quest not found. It may have expired. Use `/quest` to refresh.');
-    }
-
-    if (isQuestCompleted(quest)) {
-      return interaction.editReply(`✅ **${quest.name}** is already completed!`);
-    }
+    if (!quest) return interaction.editReply('❌ Quest expired.');
 
     const result = await completeQuest(token, quest, (p) => {
-      const pct = Math.min(100, Math.round((p.elapsed / p.duration) * 100));
-      interaction
-        .editReply(
-          `⏳ Completing **${quest.name}**…\n` +
-            `Elapsed: ${pct}% | Quest Progress: ${p.progress || 0}%`
-        )
-        .catch(() => {});
+      interaction.editReply(`⏳ Completing **${quest.name}**... Progress: ${p.progress || 0}%`).catch(() => {});
     });
 
-    if (result.success) {
-      await interaction.editReply(`✅ Quest **${quest.name}** completed successfully! 🎉`);
-    } else {
-      await interaction.editReply(
-        `❌ Failed to complete **${quest.name}**: ${result.reason}`
-      );
-    }
+    if (result.success) await interaction.editReply(`✅ **${quest.name}** completed! 🎉`);
+    else await interaction.editReply(`❌ Failed: ${result.reason}`);
   } catch (error) {
-    console.error('Quest button error:', error);
     await interaction.editReply(`❌ Error: \`${error.message}\``);
   }
 }
 
 async function handleQuestAll(interaction) {
   const token = getToken(interaction.user.id);
-  if (!token) {
-    return interaction.reply({
-      content: '❌ You haven\'t linked your token yet. Use `/link` to get started.',
-      ephemeral: true,
-    });
-  }
+  if (!token) return interaction.reply({ content: '❌ Use `/link` first.', ephemeral: true });
 
   await interaction.deferReply({ ephemeral: true });
-
   const user = await validateToken(token);
-  if (!user) {
+  if (!user || user.bot) {
     deleteToken(interaction.user.id);
-    return interaction.editReply(
-      '❌ Your token is invalid or expired. Please use `/link` to re-link.'
-    );
+    return interaction.editReply('❌ Token invalid or is a Bot Token. Use `/link` to link your USER token.');
   }
 
   try {
     const quests = await fetchQuests(token);
     const incomplete = quests.filter((q) => !isQuestCompleted(q));
+    if (incomplete.length === 0) return interaction.editReply('✅ All quests already completed! 🎉');
 
-    if (incomplete.length === 0) {
-      return interaction.editReply('✅ All your quests are already completed! 🎉');
-    }
-
-    await interaction.editReply(
-      `🔄 Starting completion of **${incomplete.length}** quest(s)…\n` +
-        `This may take a while. Each quest takes ~15 minutes.`
-    );
+    await interaction.editReply(`🔄 Completing **${incomplete.length}** quests...`);
 
     const result = await completeAllQuests(token, (p) => {
-      interaction
-        .editReply(
-          `🔄 Completing quests… (**${p.current}/${p.total}**)\n` +
-            `Current: **${p.quest.name || 'Unnamed'}**`
-        )
-        .catch(() => {});
+      interaction.editReply(`🔄 Completing **${p.current}/${p.total}**: ${p.quest.name || 'Quest'}`).catch(() => {});
     });
 
-    const summary = result.results
-      .map((r, i) => {
-        const icon = r.success ? '✅' : '❌';
-        const name = r.quest?.name || `Quest ${i + 1}`;
-        const reason = r.reason && !r.success ? ` — ${r.reason}` : '';
-        return `${icon} ${name}${reason}`;
-      })
-      .join('\n');
-
-    await interaction.editReply(
-      `📊 **Quest Completion Summary**\n` +
-        `Completed **${result.completed}** / **${result.total}** quests.\n\n${summary}`
-    );
+    const summary = result.results.map((r, i) => `${r.success ? '✅' : '❌'} ${r.quest?.name || `Quest ${i+1}`}`).join('\n');
+    await interaction.editReply(`📊 **Done!** ${result.completed}/${result.total} completed.\n\n${summary}`);
   } catch (error) {
-    console.error('Quest-all error:', error);
     await interaction.editReply(`❌ Failed: \`${error.message}\``);
   }
 }
 
 async function handleUnlink(interaction) {
   deleteToken(interaction.user.id);
-  await interaction.reply({
-    content: '✅ Your token has been removed from storage.',
-    ephemeral: true,
-  });
+  await interaction.reply({ content: '✅ Token removed.', ephemeral: true });
 }
-
-// ─── Start ──────────────────────────────────────────────────
 
 client.login(BOT_TOKEN);
