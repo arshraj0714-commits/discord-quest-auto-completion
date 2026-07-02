@@ -5,13 +5,11 @@ const GATEWAY_URL = 'wss://gateway.discord.gg/?v=9&encoding=json';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ─── REST API ───────────────────────────────────────────────
-
 function getHeaders(token) {
   return {
     Authorization: token,
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'X-Discord-Client-Build': '282549', // Latest client build required for quests
+    'X-Discord-Client-Build': '282549',
     'X-Discord-Locale': 'en-US',
   };
 }
@@ -42,9 +40,7 @@ async function ackQuest(token, questId) {
       method: 'POST',
       headers: getHeaders(token),
     });
-  } catch {
-    /* ignore ack errors */
-  }
+  } catch {}
 }
 
 async function validateToken(token) {
@@ -55,7 +51,7 @@ async function validateToken(token) {
     if (!res.ok) return null;
     const data = await res.json();
     
-    // REJECT BOT TOKENS - Bots cannot have quests
+    // DISCORD BOTS CANNOT HAVE QUESTS
     if (data.bot) {
       return { bot: true };
     }
@@ -65,8 +61,6 @@ async function validateToken(token) {
     return null;
   }
 }
-
-// ─── Quest Helpers ──────────────────────────────────────────
 
 function isQuestCompleted(quest) {
   if (!quest) return false;
@@ -91,7 +85,7 @@ function getQuestDuration(quest) {
   if (taskConfig.duration_ms) return taskConfig.duration_ms;
   if (config.duration_seconds) return config.duration_seconds * 1000;
   if (config.duration_ms) return config.duration_ms;
-  return 15 * 60 * 1000; // default 15 min
+  return 15 * 60 * 1000;
 }
 
 function createActivityForQuest(quest) {
@@ -99,7 +93,6 @@ function createActivityForQuest(quest) {
   const taskConfig = config.task_config || {};
   const taskType = (config.task_type || taskConfig.task_type || '').toUpperCase();
 
-  // Streaming quest — need a Twitch URL
   if (
     taskType.includes('STREAM') ||
     taskType.includes('WATCH') ||
@@ -107,7 +100,7 @@ function createActivityForQuest(quest) {
     taskConfig.preferred_stream_type
   ) {
     return {
-      type: 1, // STREAMING
+      type: 1,
       url: taskConfig.stream_url || 'https://www.twitch.tv/twitch',
       name: 'Twitch',
       details: 'Completing Discord Quest',
@@ -115,7 +108,6 @@ function createActivityForQuest(quest) {
     };
   }
 
-  // Game quest — need application_id
   if (
     taskType.includes('GAME') ||
     taskType.includes('PLAY') ||
@@ -123,22 +115,19 @@ function createActivityForQuest(quest) {
     config.application_id
   ) {
     return {
-      type: 0, // PLAYING
+      type: 0,
       name: taskConfig.name || config.name || 'Discord Quest',
       application_id: taskConfig.application_id || config.application_id,
       timestamps: { start: Date.now() },
     };
   }
 
-  // Fallback generic activity
   return {
     type: 0,
     name: quest.name || 'Discord Quest',
     timestamps: { start: Date.now() },
   };
 }
-
-// ─── Gateway Connection ─────────────────────────────────────
 
 class GatewayConnection {
   constructor(token) {
@@ -153,7 +142,6 @@ class GatewayConnection {
   connect(activities = []) {
     return new Promise((resolve, reject) => {
       this._activities = activities;
-
       const timeout = setTimeout(() => {
         this.disconnect();
         reject(new Error('Gateway connection timeout'));
@@ -166,13 +154,10 @@ class GatewayConnection {
       this.ws = new WebSocket(GATEWAY_URL);
 
       this.ws.on('open', () => console.log('[Gateway] Connected'));
-
       this.ws.on('message', (raw) => {
         try {
           this._handleMessage(JSON.parse(raw.toString()));
-        } catch (e) {
-          console.error('[Gateway] Parse error:', e.message);
-        }
+        } catch (e) {}
       });
 
       this.ws.on('error', (err) => {
@@ -181,7 +166,6 @@ class GatewayConnection {
       });
 
       this.ws.on('close', (code) => {
-        console.log(`[Gateway] Closed: ${code}`);
         this._cleanup();
       });
     });
@@ -192,25 +176,21 @@ class GatewayConnection {
     if (s) this.sequence = s;
 
     switch (op) {
-      case 10: // HELLO
+      case 10:
         this._startHeartbeat(d.heartbeat_interval);
         this._identify();
         break;
-
-      case 0: // DISPATCH
+      case 0:
         if (t === 'READY') {
           this.sessionId = d.session_id;
           this.ready = true;
           clearTimeout(this._timeout);
-          console.log(`[Gateway] Ready as ${d.user?.username || 'unknown'}`);
           this._resolve(d);
         }
         break;
-
-      case 11: // HEARTBEAT ACK
+      case 11:
         break;
-
-      case 1: // HEARTBEAT request
+      case 1:
         this._sendHeartbeat();
         break;
     }
@@ -249,18 +229,6 @@ class GatewayConnection {
     );
   }
 
-  updatePresence(activities) {
-    this._activities = activities;
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(
-        JSON.stringify({
-          op: 3,
-          d: { activities, status: 'online', since: 0, afk: false },
-        })
-      );
-    }
-  }
-
   _cleanup() {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
@@ -280,23 +248,14 @@ class GatewayConnection {
   }
 }
 
-// ─── Quest Completion ───────────────────────────────────────
-
 async function completeQuest(token, quest, onProgress = null) {
   if (isQuestCompleted(quest)) {
     return { success: true, quest, reason: 'Already completed' };
   }
 
-  // Ack the quest
   await ackQuest(token, quest.id);
-
-  // Build activity
   const activity = createActivityForQuest(quest);
-  console.log(
-    `[Quest] Starting: ${quest.name || quest.id} | type=${activity.type} | app=${activity.application_id || 'stream'}`
-  );
 
-  // Connect to gateway
   const conn = new GatewayConnection(token);
   try {
     await conn.connect([activity]);
@@ -304,9 +263,8 @@ async function completeQuest(token, quest, onProgress = null) {
     return { success: false, quest, reason: `Gateway: ${error.message}` };
   }
 
-  // Poll for completion
   const duration = getQuestDuration(quest);
-  const maxWait = duration + 120_000; // 2 min buffer
+  const maxWait = duration + 120_000;
   const startTime = Date.now();
 
   while (Date.now() - startTime < maxWait) {
@@ -315,7 +273,6 @@ async function completeQuest(token, quest, onProgress = null) {
 
     try {
       const updated = await fetchQuest(token, quest.id);
-
       if (onProgress) {
         onProgress({
           elapsed,
@@ -329,9 +286,7 @@ async function completeQuest(token, quest, onProgress = null) {
         conn.disconnect();
         return { success: true, quest: updated, reason: 'Completed' };
       }
-    } catch (error) {
-      console.error('[Quest] Status check error:', error.message);
-    }
+    } catch (error) {}
   }
 
   conn.disconnect();
@@ -346,7 +301,6 @@ async function completeAllQuests(token, onProgress = null) {
   for (let i = 0; i < incomplete.length; i++) {
     const quest = incomplete[i];
     if (onProgress) onProgress({ current: i + 1, total: incomplete.length, quest });
-
     const result = await completeQuest(token, quest);
     results.push(result);
   }
